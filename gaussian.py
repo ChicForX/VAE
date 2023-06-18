@@ -32,7 +32,6 @@ class VAE(nn.Module):
         x_reconst = self.decode(z)
         return x_reconst, mu, log_var, z
 
-    @staticmethod
-    def kl_divergence(mu, log_var):
+    def kl_divergence(self, mu, log_var):
         kl_divergence = - 0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
         return kl_divergence

@@ -12,6 +12,8 @@ import warnings
 import sys
 import gaussian
 import uniform
+import bernoulli
+import gm
 
 # Configure GPU or CPU settings
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -39,14 +41,15 @@ data_loader = torch.utils.data.DataLoader(dataset=dataset,
 def main():
     # Parsing Command Line Parameters
     if len(sys.argv) < 2:
-        print("Please input the distribution for the latent variables as argv[1]：1、Gaussian; 2、Uniform;")
+        print("Please input the distribution for the latent variables as argv[1]："
+              "1、Gaussian; 2、Uniform; 3、Bernoulli; 4、Gaussian Mixture")
         return
 
     model_param = int(sys.argv[1])
     # Create directories to save generated images, evaluation
     sample_dir = 'samples'
     eval_dir = 'result'
-    # 1-gaussian, 2-uniform
+    # 1-gaussian, 2-uniform, 3-mixtured gaussian
     if model_param == 1:
         model = gaussian.VAE().to(device)
         sample_dir += '_gaussian'
@@ -55,6 +58,14 @@ def main():
         model = uniform.VAE().to(device)
         sample_dir += '_uniform'
         eval_dir += '_uniform'
+    elif model_param == 3:
+        model = bernoulli.VAE().to(device)
+        sample_dir += '_bernoulli'
+        eval_dir += '_bernoulli'
+    elif model_param == 4:
+        model = gm.VAE().to(device)
+        sample_dir += '_gaussianmixture'
+        eval_dir += '_gaussianmixture'
     else:
         print("Invalid parameter!")
         return

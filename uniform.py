@@ -30,8 +30,7 @@ class VAE(nn.Module):
         z = self.reparameterize(mu, log_var)
         return self.decode(z), mu, log_var, z
 
-    @staticmethod
-    def kl_divergence(mu, log_var):
+    def kl_divergence(self, mu, log_var):
         q = mu - torch.exp(0.5 * log_var)
         p = mu + torch.exp(0.5 * log_var)
         kl_div = torch.log(1.0 / (p - q))
