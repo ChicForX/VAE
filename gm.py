@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal, MixtureSameFamily
+
+
 # latent variables distribution: gaussian mixture
 class VAE(nn.Module):
     def __init__(self, image_size=784, h_dim=400, z_dim=20, num_components=2):
@@ -24,19 +26,17 @@ class VAE(nn.Module):
         components = Normal(mu, torch.exp(0.5 * log_var))
         # Sample from the mixture distribution
         z = components.rsample()
-        # Select samples based on component indices
-        z_selected = torch.gather(z, dim=-1, index=indices.unsqueeze(-1)).squeeze(-1)
-        return z_selected
+        return z
 
     def decode(self, z):
-        print(z.size())
+        # print(z.size())
         h = F.relu(self.fc4(z))
         return torch.sigmoid(self.fc5(h))
 
     def forward(self, x):
         mu, logvar = self.encode(x)
         z = self.reparameterize(mu, logvar)
-        return self.decode(z), mu, logvar
+        return self.decode(z), mu, logvar, z
 
     def kl_divergence(self, mu, log_var):
         # Construct mixture components
@@ -46,5 +46,6 @@ class VAE(nn.Module):
         mixture_dist = MixtureSameFamily(weights, components)
         # Compute KL divergence between mixture distribution and prior
         prior_dist = Normal(torch.zeros_like(mu), torch.ones_like(log_var))
+        # TODO
         kl_div = torch.distributions.kl_divergence(mixture_dist, prior_dist).sum()
         return kl_div
