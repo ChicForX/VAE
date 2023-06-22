@@ -49,7 +49,7 @@ def main():
     # Create directories to save generated images, evaluation
     sample_dir = 'samples'
     eval_dir = 'result'
-    # 1-gaussian, 2-uniform, 3-mixtured gaussian
+    # 1-gaussian, 2-uniform, 3-bernoulli, 4-mixtured gaussian
     if model_param == 1:
         model = gaussian.VAE().to(device)
         sample_dir += '_gaussian'
