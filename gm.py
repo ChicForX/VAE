@@ -1,51 +1,126 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributions import Normal, MixtureSameFamily
-
+import torch.distributions as dist
 
 # latent variables distribution: gaussian mixture
 class VAE(nn.Module):
-    def __init__(self, image_size=784, h_dim=400, z_dim=20, num_components=2):
+    def __init__(self, image_size=784, h_dim=400, z_dim=20, num_components=10):
         super(VAE, self).__init__()
-        self.fc1 = nn.Linear(image_size, h_dim)
-        self.fc2 = nn.Linear(h_dim, z_dim)
-        self.fc3 = nn.Linear(h_dim, z_dim)
-        self.fc4 = nn.Linear(z_dim, h_dim)
-        self.fc5 = nn.Linear(h_dim, image_size)
         self.num_components = num_components
+        self.z_dim = z_dim
 
-    def encode(self, x):
-        h = F.relu(self.fc1(x))
-        return self.fc2(h), self.fc3(h)
+        self.inferwNet = torch.nn.ModuleList([
+            nn.Linear(image_size, h_dim),
+            nn.ReLU(),
+            nn.Linear(h_dim, h_dim),
+            nn.ReLU(),
+            GumbelSoftmaxLayer(h_dim, num_components)
+        ])
 
-    def reparameterize(self, mu, log_var):
-        # Sample component indices
-        indices = torch.randint(low=0, high=self.num_components, size=mu.shape[:-1]).to(mu.device)
-        # Construct mixture components
-        components = Normal(mu, torch.exp(0.5 * log_var))
-        # Sample from the mixture distribution
-        z = components.rsample()
+        self.inferzNet = torch.nn.ModuleList([
+            nn.Linear(image_size + num_components, h_dim),
+            nn.ReLU(),
+            nn.Linear(h_dim, h_dim),
+            nn.ReLU(),
+            ReparameterizeTrick(h_dim, z_dim)
+        ])
+
+        self.generatexNet = torch.nn.ModuleList([
+            nn.Linear(z_dim, h_dim),
+            nn.ReLU(),
+            nn.Linear(h_dim, image_size),
+            torch.nn.Sigmoid()
+        ])
+
+        self.w_mu = nn.Linear(num_components, z_dim)
+        self.w_var = nn.Linear(num_components, z_dim)
+
+    def inferw(self, x):
+        for i, layer in enumerate(self.inferwNet):
+            x = layer(x)
+        return x
+
+    def inferz(self, x, w):
+        concat = torch.cat((x, w), dim=1)
+        for layer in self.inferzNet:
+            concat = layer(concat)
+        return concat
+
+    def generateprior(self, w):
+        w_mu = self.w_mu(w)
+        w_var = F.softplus(self.w_var(w))
+        return w_mu, w_var
+
+    def generatex(self, z):
+        for layer in self.generatexNet:
+          z = layer(z)
         return z
 
-    def decode(self, z):
-        # print(z.size())
-        h = F.relu(self.fc4(z))
-        return torch.sigmoid(self.fc5(h))
+    def encode(self, x):
+        logits, w = self.inferw(x)
+        mu, var, z = self.inferz(x, w)
+        res = {'mean': mu, 'var': var, 'sample': z,
+              'logits': logits, 'categorical': w}
+        return res
+
+    def decode(self, z, w):
+        prior_mu, prior_var = self.generateprior(w)
+        x_rec = self.generatex(z)
+        return x_rec, prior_mu, prior_var
 
     def forward(self, x):
-        mu, logvar = self.encode(x)
-        z = self.reparameterize(mu, logvar)
-        return self.decode(z), mu, logvar, z
+        res = self.encode(x)
+        x_rec, prior_mu, prior_var = self.decode(res['sample'], res['categorical'])
+        res.update({'prior_mean': prior_mu, 'prior_var': prior_var, 'x_rec': x_rec})
+        return res
 
-    def kl_divergence(self, mu, log_var):
-        # Construct mixture components
-        components = Normal(mu, torch.exp(0.5 * log_var))
-        # Construct mixture distribution
-        weights = torch.ones(mu.shape[0], self.num_components).to(mu.device) / self.num_components
-        mixture_dist = MixtureSameFamily(weights, components)
-        # Compute KL divergence between mixture distribution and prior
-        prior_dist = Normal(torch.zeros_like(mu), torch.ones_like(log_var))
-        # TODO
-        kl_div = torch.distributions.kl_divergence(mixture_dist, prior_dist).sum()
-        return kl_div
+    def kl_divergence(self, res):
+        mu = res['mean']
+        var = res['var']
+        prior_mu = res['prior_mean']
+        prior_var = res['prior_var']
+
+        kl_div = 0.5 * (torch.sum((prior_var / var).log() + (var + (prior_mu - mu) ** 2) / prior_var - 1, dim=1)
+                        - self.z_dim + torch.sum(prior_var.log() - var.log(), dim=1))
+
+        return kl_div.mean()
+
+
+class GumbelSoftmaxLayer(nn.Module):
+    def __init__(self, h_dim, w_dim):
+        super(GumbelSoftmaxLayer, self).__init__()
+        self.logits = nn.Linear(h_dim, w_dim)
+        self.w_dim = w_dim
+    def gumbelsoftmax(self, logits, temperature=1.0):
+        w = logits + self.sample_gumbel(logits.size(), logits.is_cuda)
+        return F.softmax(w / temperature, dim=-1)
+
+    def sample_gumbel(self, shape, is_cuda=False, eps=1e-20):
+        v = torch.rand(shape)
+        if is_cuda:
+            v = v.cuda()
+        return -torch.log(-torch.log(v + eps) + eps)
+
+    def forward(self, x, temperature=1.0):
+        logits = self.logits(x).view(-1, self.w_dim)
+        w = self.gumbelsoftmax(logits, temperature)
+        return logits, w
+
+class ReparameterizeTrick(nn.Module):
+
+    def __init__(self, h_dim, z_dim):
+        super(ReparameterizeTrick, self).__init__()
+        self.mu = nn.Linear(h_dim, z_dim)
+        self.var = nn.Linear(h_dim, z_dim)
+
+    def reparameterize(self, mu, var):
+        std = torch.sqrt(var + 1e-10)
+        eps = torch.randn_like(std)
+        return mu + eps * std
+
+    def forward(self, x):
+        mu = self.mu(x)
+        var = F.softplus(self.var(x))
+        z = self.reparameterize(mu, var)
+        return mu, var, z

@@ -25,6 +25,7 @@ z_dim = 20
 num_epochs = 15
 batch_size = 128
 learning_rate = 1e-3
+model_param = 0
 
 # Get the dataset
 dataset = torchvision.datasets.MNIST(root='./data',
@@ -89,7 +90,9 @@ def main():
         for i, (x, y) in enumerate(data_loader):
             # forward propagation
             x = x.to(device).view(-1, image_size)  # batch_size*1*28*28 ---->batch_size*image_size  where image_size=1*28*28=784
-            x_reconst, mu, log_var, z = model(x)  # x:batch_size*748
+            res = model(x)
+            x_reconst = res['x_rec']
+            z = res['sample']
 
             # Record the output of latentspace
             y_cpu = y.cpu().detach().numpy()
@@ -100,7 +103,7 @@ def main():
             # Calculate reconstruction loss and KL divergence
             reconst_loss = F.binary_cross_entropy(x_reconst, x, reduction='sum')
 
-            kl_divergence = model.kl_divergence(mu, log_var)
+            kl_divergence = model.kl_divergence(res)
 
             # Backpropagation and Optimization
             loss = reconst_loss + kl_divergence
@@ -128,15 +131,19 @@ def main():
             # saving sampled values
             z = torch.randn(batch_size, z_dim).to(device)  # z: batch_size * z_dim = 128*20
             # Decode and output the random number z
-            out = model.decode(z).view(-1, 1, 28, 28)
+            if model_param == 4:
+                x_rec_raw, _, _ = model.decode(z, res['categorical'])
+                out = x_rec_raw.view(-1, 1, 28, 28)
+            else:
+                out = model.decode(z).view(-1, 1, 28, 28)
             save_image(out, os.path.join(sample_dir, 'sampled-{}.png'.format(epoch + 1)))
 
             # save reconstruction values
             # x: batch_size*748, forward propagation, obtaining reconstruction value out
-            out, _, _, _ = model(x)
+            out = model(x)
             # Splice input and output together, output and save
             # batch_size*1*28*（28+28）=batch_size*1*28*56
-            x_concat = torch.cat([x.view(-1, 1, 28, 28), out.view(-1, 1, 28, 28)], dim=3)
+            x_concat = torch.cat([x.view(-1, 1, 28, 28), out['x_rec'].view(-1, 1, 28, 28)], dim=3)
             save_image(x_concat, os.path.join(sample_dir, 'reconst-{}.png'.format(epoch + 1)))
 
     # Perform t-SNE on the latent variables

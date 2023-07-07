@@ -29,9 +29,12 @@ class VAE(nn.Module):
     def forward(self, x):
         mu, log_var = self.encode(x)
         z = self.reparameterize(mu, log_var)
-        x_reconst = self.decode(z)
-        return x_reconst, mu, log_var, z
+        x_rec = self.decode(z)
+        res = {'mean': mu, 'log_var': log_var, 'x_rec': x_rec, 'sample': z}
+        return res
 
-    def kl_divergence(self, mu, log_var):
+    def kl_divergence(self, res):
+        mu = res['mean']
+        log_var = res['log_var']
         kl_divergence = - 0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
         return kl_divergence
