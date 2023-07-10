@@ -81,8 +81,10 @@ class VAE(nn.Module):
         prior_mu = res['prior_mean']
         prior_var = res['prior_var']
 
-        kl_div = 0.5 * (torch.sum((prior_var / var).log() + (var + (prior_mu - mu) ** 2) / prior_var - 1, dim=1)
-                        - self.z_dim + torch.sum(prior_var.log() - var.log(), dim=1))
+        kl_part1 = torch.log(prior_var / var)
+        kl_part2 = (var + (prior_mu - mu) ** 2) / prior_var - 1
+
+        kl_div = 0.5 * torch.sum(kl_part1 + kl_part2, dim=1)  # sum the KL divergence of each sample
 
         return kl_div.mean()
 
@@ -106,6 +108,7 @@ class GumbelSoftmaxLayer(nn.Module):
         logits = self.logits(x).view(-1, self.w_dim)
         w = self.gumbelsoftmax(logits, temperature)
         return logits, w
+
 
 class ReparameterizeTrick(nn.Module):
 

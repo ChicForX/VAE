@@ -6,6 +6,7 @@ from torchvision import transforms
 from torchvision.utils import save_image
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
+from matplotlib.lines import Line2D
 from sklearn.manifold import TSNE
 import numpy as np
 import warnings
@@ -181,6 +182,14 @@ def plotdistribution(Label, Mat, ax):
     #  plt.scatter(np.array(x), np.array(y), s=size, c=color, marker=markers)
     ax[0].scatter(np.array(x), np.array(y), s=5, c=color, marker='o')  # The scatter function only supports array type data
     ax[0].set_axis_on()
+
+    # add labels
+    legend_elements = []
+    for label, color in map_color.items():
+        legend_elements.append(
+            Line2D([0], [0], marker='o', color='w', markerfacecolor=color, markersize=5, label=label))
+    ax[0].legend(handles=legend_elements, title='Label', loc='upper right', handlelength=0.8, handleheight=0.8)
+
 
 if __name__ == "__main__":
     main()
