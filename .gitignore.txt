@@ -1,0 +1,7 @@
+.idea\
+.pytest_cache\
+.result_gaussian\
+.result_uniform\
+samples_gaussian\
+samples_uniform\
+_pycache_\

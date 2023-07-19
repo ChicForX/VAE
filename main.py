@@ -3,6 +3,7 @@ import torch
 import torch.nn.functional as F
 import torchvision
 from torchvision import transforms
+import torchvision.utils as vutils
 from torchvision.utils import save_image
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
@@ -15,6 +16,8 @@ import gaussian
 import uniform
 import bernoulli
 import gm
+from sklearn.metrics import confusion_matrix
+import seaborn as sns
 
 # Configure GPU or CPU settings
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -23,11 +26,11 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 image_size = 784
 h_dim = 400
 z_dim = 20
-num_epochs = 15
+num_epochs = 3
 batch_size = 128
-learning_rate = 1e-3
+learning_rate = 5e-4
 model_param = 0
-
+num_clusters = 10
 # Get the dataset
 dataset = torchvision.datasets.MNIST(root='./data',
                                      train=True,
@@ -68,17 +71,16 @@ def main():
         model = gm.VAE().to(device)
         sample_dir += '_gaussianmixture'
         eval_dir += '_gaussianmixture'
+        #for confusion matrix
+        predicted_labels = []
+        real_labels = []
+        #init cluster centers
+        model.inferwNet.initialize_cluster_centers(data_loader, num_clusters, device)
     else:
         print("Invalid parameter!")
         return
     print(model)
-    """VAE(
-      (fc1): Linear(in_features=784, out_features=400, bias=True)
-      (fc2): Linear(in_features=400, out_features=20, bias=True)
-      (fc3): Linear(in_features=400, out_features=20, bias=True)
-      (fc4): Linear(in_features=20, out_features=400, bias=True)
-      (fc5): Linear(in_features=400, out_features=784, bias=True)
-    )"""
+
     if not os.path.exists(sample_dir):
         os.makedirs(sample_dir)
 
@@ -135,6 +137,8 @@ def main():
             if model_param == 4:
                 x_rec_raw, _, _ = model.decode(z, res['categorical'])
                 out = x_rec_raw.view(-1, 1, 28, 28)
+                predicted_labels.append(torch.topk(res['categorical'], 1)[1].squeeze(1))
+                real_labels.append(y)
             else:
                 out = model.decode(z).view(-1, 1, 28, 28)
             save_image(out, os.path.join(sample_dir, 'sampled-{}.png'.format(epoch + 1)))
@@ -147,23 +151,28 @@ def main():
             x_concat = torch.cat([x.view(-1, 1, 28, 28), out['x_rec'].view(-1, 1, 28, 28)], dim=3)
             save_image(x_concat, os.path.join(sample_dir, 'reconst-{}.png'.format(epoch + 1)))
 
+    draw_confusion_matrix(model_param, predicted_labels, real_labels)
+
+    # test_gmvae_w(model, x, y, sample_dir)
+
     # Perform t-SNE on the latent variables
-    fig, ax = plt.subplots(1, 3)
-    eval_label = np.load(eval_dir + "/eval_label.npy")
-    eval_data = np.load(eval_dir + "/eval_data.npy")
-    plotdistribution(eval_label, eval_data, ax)
+    # fig, ax = plt.subplots(1, 3)
+    # eval_label = np.load(eval_dir + "/eval_label.npy")
+    # eval_data = np.load(eval_dir + "/eval_data.npy")
+    # plotdistribution(eval_label, eval_data, ax)
+    #
+    # # Display reconst-1 and reconst-15 images
+    # image_1 = mpimg.imread(sample_dir + '/reconst-1.png')
+    # plt.subplot(1, 3, 2)
+    # ax[1].imshow(image_1)
+    # ax[1].set_axis_off()
+    #
+    # image_15 = mpimg.imread(sample_dir + '/reconst-15.png')
+    # plt.subplot(1, 3, 3)
+    # ax[2].imshow(image_15)
+    # ax[2].set_axis_off()
+    # plt.show()
 
-    # Display reconst-1 and reconst-15 images
-    image_1 = mpimg.imread(sample_dir + '/reconst-1.png')
-    plt.subplot(1, 3, 2)
-    ax[1].imshow(image_1)
-    ax[1].set_axis_off()
-
-    image_15 = mpimg.imread(sample_dir + '/reconst-15.png')
-    plt.subplot(1, 3, 3)
-    ax[2].imshow(image_15)
-    ax[2].set_axis_off()
-    plt.show()
 
 def plotdistribution(Label, Mat, ax):
     warnings.filterwarnings('ignore', category=FutureWarning)
@@ -190,10 +199,58 @@ def plotdistribution(Label, Mat, ax):
             Line2D([0], [0], marker='o', color='w', markerfacecolor=color, markersize=5, label=label))
     ax[0].legend(handles=legend_elements, title='Label', loc='upper right', handlelength=0.8, handleheight=0.8)
 
+def draw_confusion_matrix(model_param, predicted_labels, real_labels):
+    # Confusion Matrix for GMVAE
+    print(predicted_labels)
+    print(real_labels)
+    if model_param == 4:
+        with torch.no_grad():
+            real_labels = torch.cat(real_labels).cpu().numpy().flatten()
+            predicted_labels = torch.cat(predicted_labels).cpu().numpy().flatten()
+            # create a dictionary to store the real label list for each index
+            # label_mapping = {}
+            # for pred, real in zip(predicted_labels, real_labels):
+            #     if pred not in label_mapping:
+            #         label_mapping[pred] = [real]
+            #     else:
+            #         label_mapping[pred].append(real)
+            # # Find the mode of the real label corresponding to each index
+            # predicted_indices_mapping = {}
+            # for pred, real_list in label_mapping.items():
+            #     predicted_indices_mapping[pred] = np.argmax(np.bincount(real_list))
+            # print(predicted_indices_mapping)
+
+            confusion = confusion_matrix(real_labels, predicted_labels)
+            fig, ax = plt.subplots(figsize=(8, 6))
+            sns.heatmap(confusion, annot=True, fmt="d", cmap="Blues", cbar=False, ax=ax)
+            ax.set_xlabel('Predicted Labels')
+            ax.set_ylabel('True Labels')
+            ax.set_title('Confusion Matrix')
+            plt.show()
+
+
+def test_gmvae_w(model, x, real_labels, sample_dir):
+    x_concat = torch.zeros(x.size(0), 1, 28, 28 * 11)
+    # Filter images by digit type
+    digit_indices = torch.nonzero((real_labels == 5)).flatten()
+    digit_images = x[digit_indices]
+    # Choose an image from the dataset
+    image = digit_images[0].unsqueeze(0)  # Select the first image and add a batch dimension
+    x_concat[:, :, :, 0:28] = image.view(-1, 1, 28, 28)
+    #test features of w
+    for i in range(10):
+        vector = torch.zeros(1, 10).to(device)
+        vector[:, i] = 1
+        mu, var, z = model.inferz(image, vector)
+        x_rec = model.generatex(z)
+        x_concat[:, :, :, (i + 1) * 28 : (i + 2) * 28] = x_rec.view(-1, 1, 28, 28)
+
+    # Display input and reconstructed images
+    vutils.save_image(x_concat, os.path.join(sample_dir, 'testw_reconst.png'))
+    plt.imshow(x_concat[0, 0].cpu().detach().numpy(), cmap='gray')
+    plt.show()
+
 
 if __name__ == "__main__":
     main()
-
-
-
 
