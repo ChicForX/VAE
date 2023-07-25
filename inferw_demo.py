@@ -41,8 +41,8 @@ def main():
     # Visualize with t-SNE
     # visualize_with_tsne(inferw_net, data_loader, device)
 
-    num_epochs = 10
-    learning_rate = 1e-9
+    num_epochs = 5
+    learning_rate = 1e-8
     train_inferw_net(inferw_net, data_loader, num_epochs, learning_rate)
 
     # visualize_conv1_features(inferw_net, data_loader, device)
@@ -131,8 +131,9 @@ class InferwNet(nn.Module):
             nn.MaxPool2d(kernel_size=2, stride=2),
             nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2, stride=2)
+            nn.MaxPool2d(kernel_size=2, stride=2),
         )
+
         self.fc_layers = nn.Sequential(
             nn.Linear(64 * 7 * 7, 10)
         )
@@ -162,10 +163,12 @@ class InferwNet(nn.Module):
     def get_conv1_features(self, x):
         # This function returns the output of the first convolutional layer
         x = x.view(-1, 1, 28, 28)
-        conv1_output = self.conv_layers[0](x)
-        conv1_output = self.conv_layers[1](conv1_output)
-        conv1_output = self.conv_layers[2](conv1_output)
-        return conv1_output
+        conv_output = self.conv_layers[0](x)
+        conv_output = self.conv_layers[1](conv_output)
+        conv_output = self.conv_layers[2](conv_output)
+        conv_output = self.conv_layers[3](conv_output)
+        conv_output = self.conv_layers[4](conv_output)
+        return conv_output
 
     def forward(self, x):
         x = x.view(-1, 1, 28, 28)

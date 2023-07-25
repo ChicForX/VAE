@@ -36,5 +36,5 @@ class VAE(nn.Module):
     def kl_divergence(self, res):
         mu = res['mean']
         log_var = res['log_var']
-        kl_divergence = - 0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
+        kl_divergence = - 0.5 * torch.mean(1 + log_var - mu.pow(2) - log_var.exp())
         return kl_divergence

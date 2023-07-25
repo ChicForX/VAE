@@ -26,9 +26,9 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 image_size = 784
 h_dim = 400
 z_dim = 20
-num_epochs = 3
+num_epochs = 20
 batch_size = 128
-learning_rate = 5e-4
+learning_rate = 3e-4
 model_param = 0
 num_clusters = 10
 # Get the dataset
@@ -74,8 +74,6 @@ def main():
         #for confusion matrix
         predicted_labels = []
         real_labels = []
-        #init cluster centers
-        model.inferwNet.initialize_cluster_centers(data_loader, num_clusters, device)
     else:
         print("Invalid parameter!")
         return
@@ -104,9 +102,13 @@ def main():
             z_np.extend(z_cpu)  # batch*20
 
             # Calculate reconstruction loss and KL divergence
-            reconst_loss = F.binary_cross_entropy(x_reconst, x, reduction='sum')
-
-            kl_divergence = model.kl_divergence(res)
+            if model_param == 4:
+                reconst_loss = F.binary_cross_entropy(x_reconst, x, reduction='sum')
+                reconst_loss = reconst_loss/batch_size
+                kl_divergence = model.kl_divergence(res)
+            else:
+                reconst_loss = F.binary_cross_entropy(x_reconst, x, reduction='sum')
+                kl_divergence = model.kl_divergence(res)
 
             # Backpropagation and Optimization
             loss = reconst_loss + kl_divergence
@@ -151,27 +153,27 @@ def main():
             x_concat = torch.cat([x.view(-1, 1, 28, 28), out['x_rec'].view(-1, 1, 28, 28)], dim=3)
             save_image(x_concat, os.path.join(sample_dir, 'reconst-{}.png'.format(epoch + 1)))
 
-    draw_confusion_matrix(model_param, predicted_labels, real_labels)
-
-    # test_gmvae_w(model, x, y, sample_dir)
+    if model_param == 4:
+        draw_confusion_matrix(model_param, predicted_labels, real_labels)
+        test_gmvae_w(model, x, y, sample_dir)
 
     # Perform t-SNE on the latent variables
-    # fig, ax = plt.subplots(1, 3)
-    # eval_label = np.load(eval_dir + "/eval_label.npy")
-    # eval_data = np.load(eval_dir + "/eval_data.npy")
-    # plotdistribution(eval_label, eval_data, ax)
-    #
-    # # Display reconst-1 and reconst-15 images
-    # image_1 = mpimg.imread(sample_dir + '/reconst-1.png')
-    # plt.subplot(1, 3, 2)
-    # ax[1].imshow(image_1)
-    # ax[1].set_axis_off()
-    #
-    # image_15 = mpimg.imread(sample_dir + '/reconst-15.png')
-    # plt.subplot(1, 3, 3)
-    # ax[2].imshow(image_15)
-    # ax[2].set_axis_off()
-    # plt.show()
+    fig, ax = plt.subplots(1, 3)
+    eval_label = np.load(eval_dir + "/eval_label.npy")
+    eval_data = np.load(eval_dir + "/eval_data.npy")
+    plotdistribution(eval_label, eval_data, ax)
+
+    # Display reconst-1 and reconst-15 images
+    image_1 = mpimg.imread(sample_dir + '/reconst-1.png')
+    plt.subplot(1, 3, 2)
+    ax[1].imshow(image_1)
+    ax[1].set_axis_off()
+
+    image_15 = mpimg.imread(sample_dir + '/reconst-15.png')
+    plt.subplot(1, 3, 3)
+    ax[2].imshow(image_15)
+    ax[2].set_axis_off()
+    plt.show()
 
 
 def plotdistribution(Label, Mat, ax):
@@ -201,32 +203,32 @@ def plotdistribution(Label, Mat, ax):
 
 def draw_confusion_matrix(model_param, predicted_labels, real_labels):
     # Confusion Matrix for GMVAE
-    print(predicted_labels)
-    print(real_labels)
-    if model_param == 4:
-        with torch.no_grad():
-            real_labels = torch.cat(real_labels).cpu().numpy().flatten()
-            predicted_labels = torch.cat(predicted_labels).cpu().numpy().flatten()
-            # create a dictionary to store the real label list for each index
-            # label_mapping = {}
-            # for pred, real in zip(predicted_labels, real_labels):
-            #     if pred not in label_mapping:
-            #         label_mapping[pred] = [real]
-            #     else:
-            #         label_mapping[pred].append(real)
-            # # Find the mode of the real label corresponding to each index
-            # predicted_indices_mapping = {}
-            # for pred, real_list in label_mapping.items():
-            #     predicted_indices_mapping[pred] = np.argmax(np.bincount(real_list))
-            # print(predicted_indices_mapping)
+    # print(predicted_labels)
+    # print(real_labels)
 
-            confusion = confusion_matrix(real_labels, predicted_labels)
-            fig, ax = plt.subplots(figsize=(8, 6))
-            sns.heatmap(confusion, annot=True, fmt="d", cmap="Blues", cbar=False, ax=ax)
-            ax.set_xlabel('Predicted Labels')
-            ax.set_ylabel('True Labels')
-            ax.set_title('Confusion Matrix')
-            plt.show()
+    with torch.no_grad():
+        real_labels = torch.cat(real_labels).cpu().numpy().flatten()
+        predicted_labels = torch.cat(predicted_labels).cpu().numpy().flatten()
+        # create a dictionary to store the real label list for each index
+        # label_mapping = {}
+        # for pred, real in zip(predicted_labels, real_labels):
+        #     if pred not in label_mapping:
+        #         label_mapping[pred] = [real]
+        #     else:
+        #         label_mapping[pred].append(real)
+        # # Find the mode of the real label corresponding to each index
+        # predicted_indices_mapping = {}
+        # for pred, real_list in label_mapping.items():
+        #     predicted_indices_mapping[pred] = np.argmax(np.bincount(real_list))
+        # print(predicted_indices_mapping)
+
+        confusion = confusion_matrix(real_labels, predicted_labels)
+        fig, ax = plt.subplots(figsize=(8, 6))
+        sns.heatmap(confusion, annot=True, fmt="d", cmap="Blues", cbar=False, ax=ax)
+        ax.set_xlabel('Predicted Labels')
+        ax.set_ylabel('True Labels')
+        ax.set_title('Confusion Matrix')
+        plt.show()
 
 
 def test_gmvae_w(model, x, real_labels, sample_dir):
