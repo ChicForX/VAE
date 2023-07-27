@@ -149,13 +149,6 @@ class ReparameterizeTrick(nn.Module):
 class InferwNet(nn.Module):
     def __init__(self, image_size, num_clusters):
         super(InferwNet, self).__init__()
-        # self.layers = nn.Sequential(
-        #     nn.Linear(image_size, 512),
-        #     nn.ReLU(),
-        #     nn.Linear(512, 512),
-        #     nn.ReLU(),
-        #     nn.Linear(512, num_clusters)
-        # )
         self.conv_layers = nn.Sequential(
             nn.Conv2d(in_channels=1, out_channels=32, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),

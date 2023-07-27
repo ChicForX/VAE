@@ -16,8 +16,10 @@ import gaussian
 import uniform
 import bernoulli
 import gm
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, accuracy_score
 import seaborn as sns
+from scipy.stats import mode
+from collections import defaultdict
 
 # Configure GPU or CPU settings
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -26,9 +28,9 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 image_size = 784
 h_dim = 400
 z_dim = 20
-num_epochs = 20
+num_epochs = 15
 batch_size = 128
-learning_rate = 3e-4
+learning_rate = 1e-3
 model_param = 0
 num_clusters = 10
 # Get the dataset
@@ -139,8 +141,9 @@ def main():
             if model_param == 4:
                 x_rec_raw, _, _ = model.decode(z, res['categorical'])
                 out = x_rec_raw.view(-1, 1, 28, 28)
-                predicted_labels.append(torch.topk(res['categorical'], 1)[1].squeeze(1))
-                real_labels.append(y)
+                if epoch > num_epochs - 4:
+                    predicted_labels.append(torch.topk(res['categorical'], 1)[1].squeeze(1))
+                    real_labels.append(y)
             else:
                 out = model.decode(z).view(-1, 1, 28, 28)
             save_image(out, os.path.join(sample_dir, 'sampled-{}.png'.format(epoch + 1)))
@@ -154,8 +157,9 @@ def main():
             save_image(x_concat, os.path.join(sample_dir, 'reconst-{}.png'.format(epoch + 1)))
 
     if model_param == 4:
-        draw_confusion_matrix(model_param, predicted_labels, real_labels)
-        test_gmvae_w(model, x, y, sample_dir)
+        label_mappings = get_pred_real_label_mapping(predicted_labels, real_labels)
+        draw_confusion_matrix(predicted_labels, real_labels, label_mappings)
+        test_gmvae_w(model, x, y, sample_dir, label_mappings)
 
     # Perform t-SNE on the latent variables
     fig, ax = plt.subplots(1, 3)
@@ -201,7 +205,69 @@ def plotdistribution(Label, Mat, ax):
             Line2D([0], [0], marker='o', color='w', markerfacecolor=color, markersize=5, label=label))
     ax[0].legend(handles=legend_elements, title='Label', loc='upper right', handlelength=0.8, handleheight=0.8)
 
-def draw_confusion_matrix(model_param, predicted_labels, real_labels):
+
+
+def find_pred_true_mapping(predicted_labels, real_labels):
+    label_mappings = {}
+    label_rates = {}
+    for i in np.unique(real_labels):
+        target_value = i
+        indices = np.where(real_labels == target_value)[0]
+
+        corresponding_values = predicted_labels[indices]
+
+        mode_result = mode(corresponding_values, keepdims=True)
+        most_common_value = mode_result.mode[0]
+        label_rate = np.count_nonzero(corresponding_values == most_common_value) / len(corresponding_values)
+
+        if (most_common_value in label_rates and label_rates[most_common_value] is not None \
+                and label_rate > label_rates[most_common_value]) or \
+                (most_common_value not in label_rates or label_rates[most_common_value] is None):
+            label_rates[most_common_value] = label_rate
+            # mapping: pred -> real
+            label_mappings[most_common_value] = i
+
+    return label_mappings
+
+def check_duplicate_labels(predicted_labels, real_labels, label_mappings):
+
+    while True:
+        mapping_values = set(label_mappings.values())
+        mapping_keys = set(label_mappings.keys())
+        left_real_labels = set(real_labels) - mapping_values
+        if len(left_real_labels) <= 0:
+            break
+        elif len(left_real_labels) == 1:
+            left_pred_labels = set(predicted_labels) - mapping_keys
+            label_mappings[left_pred_labels.pop()] = left_real_labels.pop()
+        else:
+            new_label_idx1 = np.array([i for i in range(len(real_labels)) if real_labels[i] in left_real_labels])
+            new_label_idx2 = np.array([i for i in range(len(predicted_labels)) if predicted_labels[i] not in mapping_keys])
+            new_label_idx = np.intersect1d(new_label_idx1, new_label_idx2)
+            if len(new_label_idx) > 0:
+                left_label_mappings = find_pred_true_mapping(predicted_labels[new_label_idx], real_labels[new_label_idx])
+                label_mappings.update(left_label_mappings)
+            else:
+                left_pred_labels = sorted(set(predicted_labels) - mapping_keys)
+                left_real_labels = sorted(left_real_labels)
+                for i, pred_label in enumerate(left_pred_labels):
+                    label_mappings[pred_label] = left_real_labels[i]
+
+
+    return label_mappings
+
+def replace_confusion_elements(value, label_mappings):
+    return label_mappings.get(value, value)
+
+def get_pred_real_label_mapping(predicted_labels, real_labels):
+    real_labels = torch.cat(real_labels).cpu().numpy().flatten()
+    predicted_labels = torch.cat(predicted_labels).cpu().numpy().flatten()
+
+    label_mappings = find_pred_true_mapping(predicted_labels, real_labels)
+    label_mappings = check_duplicate_labels(predicted_labels, real_labels, label_mappings)
+    return label_mappings
+
+def draw_confusion_matrix(predicted_labels, real_labels, label_mappings):
     # Confusion Matrix for GMVAE
     # print(predicted_labels)
     # print(real_labels)
@@ -209,20 +275,15 @@ def draw_confusion_matrix(model_param, predicted_labels, real_labels):
     with torch.no_grad():
         real_labels = torch.cat(real_labels).cpu().numpy().flatten()
         predicted_labels = torch.cat(predicted_labels).cpu().numpy().flatten()
-        # create a dictionary to store the real label list for each index
-        # label_mapping = {}
-        # for pred, real in zip(predicted_labels, real_labels):
-        #     if pred not in label_mapping:
-        #         label_mapping[pred] = [real]
-        #     else:
-        #         label_mapping[pred].append(real)
-        # # Find the mode of the real label corresponding to each index
-        # predicted_indices_mapping = {}
-        # for pred, real_list in label_mapping.items():
-        #     predicted_indices_mapping[pred] = np.argmax(np.bincount(real_list))
-        # print(predicted_indices_mapping)
 
-        confusion = confusion_matrix(real_labels, predicted_labels)
+        vectorized_replace = np.vectorize(replace_confusion_elements)
+        adjusted_pred_labels = vectorized_replace(predicted_labels, label_mappings)
+        confusion = confusion_matrix(real_labels, adjusted_pred_labels)
+
+        # Calculate the accuracy of prediction
+        accuracy = accuracy_score(real_labels, adjusted_pred_labels)
+        print(f"Accuracy of prediction:    {accuracy}")
+
         fig, ax = plt.subplots(figsize=(8, 6))
         sns.heatmap(confusion, annot=True, fmt="d", cmap="Blues", cbar=False, ax=ax)
         ax.set_xlabel('Predicted Labels')
@@ -230,8 +291,7 @@ def draw_confusion_matrix(model_param, predicted_labels, real_labels):
         ax.set_title('Confusion Matrix')
         plt.show()
 
-
-def test_gmvae_w(model, x, real_labels, sample_dir):
+def test_gmvae_w(model, x, real_labels, sample_dir, label_mappings):
     x_concat = torch.zeros(x.size(0), 1, 28, 28 * 11)
     # Filter images by digit type
     digit_indices = torch.nonzero((real_labels == 5)).flatten()
@@ -242,7 +302,8 @@ def test_gmvae_w(model, x, real_labels, sample_dir):
     #test features of w
     for i in range(10):
         vector = torch.zeros(1, 10).to(device)
-        vector[:, i] = 1
+        j = next((key for key, value in label_mappings.items() if value == i), None)
+        vector[:, j] = 1
         mu, var, z = model.inferz(image, vector)
         x_rec = model.generatex(z)
         x_concat[:, :, :, (i + 1) * 28 : (i + 2) * 28] = x_rec.view(-1, 1, 28, 28)
