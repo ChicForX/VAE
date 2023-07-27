@@ -16,6 +16,7 @@ import gaussian
 import uniform
 import bernoulli
 import gm
+import inferw_pretrain
 from sklearn.metrics import confusion_matrix, accuracy_score
 import seaborn as sns
 from scipy.stats import mode
@@ -28,7 +29,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 image_size = 784
 h_dim = 400
 z_dim = 20
-num_epochs = 15
+num_epochs = 20
 batch_size = 128
 learning_rate = 1e-3
 model_param = 0
@@ -49,7 +50,8 @@ def main():
     # Parsing Command Line Parameters
     if len(sys.argv) < 2:
         print("Please input the distribution for the latent variables as argv[1]："
-              "1、Gaussian; 2、Uniform; 3、Bernoulli; 4、Gaussian Mixture")
+              "1、Gaussian; 2、Uniform; 3、Bernoulli; 4、Gaussian Mixture(Unsupervised); "
+              "5、Gaussian Mixture(Semi-supervised)")
         return
 
     model_param = int(sys.argv[1])
@@ -76,6 +78,14 @@ def main():
         #for confusion matrix
         predicted_labels = []
         real_labels = []
+    elif model_param == 5:
+        model = gm.VAE().to(device)
+        sample_dir += '_gaussianmixture'
+        eval_dir += '_gaussianmixture'
+        # for confusion matrix
+        predicted_labels = []
+        real_labels = []
+        model = inferw_pretrain.main(data_loader, model, image_size, device)
     else:
         print("Invalid parameter!")
         return
@@ -104,7 +114,7 @@ def main():
             z_np.extend(z_cpu)  # batch*20
 
             # Calculate reconstruction loss and KL divergence
-            if model_param == 4:
+            if model_param == 4 or model_param == 5:
                 reconst_loss = F.binary_cross_entropy(x_reconst, x, reduction='sum')
                 reconst_loss = reconst_loss/batch_size
                 kl_divergence = model.kl_divergence(res)
@@ -138,10 +148,10 @@ def main():
             # saving sampled values
             z = torch.randn(batch_size, z_dim).to(device)  # z: batch_size * z_dim = 128*20
             # Decode and output the random number z
-            if model_param == 4:
+            if model_param == 4 or model_param == 5:
                 x_rec_raw, _, _ = model.decode(z, res['categorical'])
                 out = x_rec_raw.view(-1, 1, 28, 28)
-                if epoch > num_epochs - 4:
+                if epoch > num_epochs - 3:
                     predicted_labels.append(torch.topk(res['categorical'], 1)[1].squeeze(1))
                     real_labels.append(y)
             else:
@@ -156,8 +166,9 @@ def main():
             x_concat = torch.cat([x.view(-1, 1, 28, 28), out['x_rec'].view(-1, 1, 28, 28)], dim=3)
             save_image(x_concat, os.path.join(sample_dir, 'reconst-{}.png'.format(epoch + 1)))
 
-    if model_param == 4:
+    if model_param == 4 or model_param == 5:
         label_mappings = get_pred_real_label_mapping(predicted_labels, real_labels)
+        print(label_mappings)
         draw_confusion_matrix(predicted_labels, real_labels, label_mappings)
         test_gmvae_w(model, x, y, sample_dir, label_mappings)
 

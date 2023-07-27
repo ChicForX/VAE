@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.nn.init as init
 import numpy as np
 np.set_printoptions(threshold=np.inf)
 
@@ -98,18 +99,18 @@ class VAE(nn.Module):
         var = res['var']
         prior_mu = res['prior_mean']
         prior_var = res['prior_var']
-        # cross_entropy = 10.0 * self.cross_entropy_loss(res['logits'], res['prob'])
+        cross_entropy = 3 * self.cross_entropy_loss(res['logits'], res['prob'])
         # print(f"cross_entropy:    {cross_entropy}")
         gaussian_loss = self.gaussian_loss(res['sample'], mu, var, prior_mu, prior_var)
         # print(f"gaussian_loss:    {gaussian_loss}")
-        focal_loss = self.focal_loss(res['logits'], res['prob'])
+        # focal_loss = self.focal_loss(res['logits'], res['prob'])
         # print(f"focal_loss:    {focal_loss}")
         kl_part1 = torch.log(prior_var / var)
         kl_part2 = (var + (prior_mu - mu) ** 2) / prior_var - 1
         kl_div = 0.5 * torch.mean(kl_part1 + kl_part2, dim=1)  # sum the KL divergence of each sample
         kl_div = kl_div.mean()
         # print(f"kl_div:        {kl_div}")
-        return focal_loss + kl_div + gaussian_loss
+        return cross_entropy + kl_div + gaussian_loss
 
     def log_normal(self, x, mu, var, eps=1e-8):
       var = var + 1e-8
@@ -119,6 +120,7 @@ class VAE(nn.Module):
     def gaussian_loss(self, z, z_mu, z_var, z_mu_prior, z_var_prior):
         loss = self.log_normal(z, z_mu, z_var) - self.log_normal(z, z_mu_prior, z_var_prior)
         return loss.mean()
+
     def cross_entropy_loss(self, logits, targets):
         return -torch.sum(torch.sum(targets * F.log_softmax(logits, dim=-1), dim=-1))
 
@@ -170,11 +172,7 @@ class InferwNet(nn.Module):
         # # Random rotation
         # rotation_transform = transforms.RandomRotation(degrees=(-50, 50))
         # rotated_x = torch.stack([rotation_transform(img) for img in reshaped_x])
-        # rotated_x = rotated_x.view(-1, image_size)
 
-        # Pass the rotated_x through the layers
-        # logits = self.layers(x)
-        # logits = self.layers(rotated_x)
         x_reshape = x.view(-1, 1, 28, 28)
         features = self.conv_layers(x_reshape)
         features = features.view(features.size(0), -1)  # Flatten the tensor
