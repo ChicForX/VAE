@@ -99,7 +99,7 @@ class VAE(nn.Module):
         var = res['var']
         prior_mu = res['prior_mean']
         prior_var = res['prior_var']
-        cross_entropy = 3 * self.cross_entropy_loss(res['logits'], res['prob'])
+        cross_entropy = 3.0 * self.cross_entropy_loss(res['logits'], res['prob'])
         # print(f"cross_entropy:    {cross_entropy}")
         gaussian_loss = self.gaussian_loss(res['sample'], mu, var, prior_mu, prior_var)
         # print(f"gaussian_loss:    {gaussian_loss}")
@@ -108,7 +108,7 @@ class VAE(nn.Module):
         kl_part1 = torch.log(prior_var / var)
         kl_part2 = (var + (prior_mu - mu) ** 2) / prior_var - 1
         kl_div = 0.5 * torch.mean(kl_part1 + kl_part2, dim=1)  # sum the KL divergence of each sample
-        kl_div = kl_div.mean()
+        kl_div = 5.0 * kl_div.mean()
         # print(f"kl_div:        {kl_div}")
         return cross_entropy + kl_div + gaussian_loss
 

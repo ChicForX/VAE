@@ -29,7 +29,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 image_size = 784
 h_dim = 400
 z_dim = 20
-num_epochs = 20
+num_epochs = 17
 batch_size = 128
 learning_rate = 1e-3
 model_param = 0
@@ -86,6 +86,7 @@ def main():
         predicted_labels = []
         real_labels = []
         model = inferw_pretrain.main(data_loader, model, image_size, device)
+        accuracy_pretrain = inferw_pretrain.accuracy_after_pretrain(model.inferwNet, data_loader, image_size, device)
     else:
         print("Invalid parameter!")
         return
@@ -151,7 +152,7 @@ def main():
             if model_param == 4 or model_param == 5:
                 x_rec_raw, _, _ = model.decode(z, res['categorical'])
                 out = x_rec_raw.view(-1, 1, 28, 28)
-                if epoch > num_epochs - 3:
+                if epoch > num_epochs - 4:
                     predicted_labels.append(torch.topk(res['categorical'], 1)[1].squeeze(1))
                     real_labels.append(y)
             else:
@@ -169,6 +170,7 @@ def main():
     if model_param == 4 or model_param == 5:
         label_mappings = get_pred_real_label_mapping(predicted_labels, real_labels)
         print(label_mappings)
+        print(f"Validation Accuracy After Pretrain: {accuracy_pretrain:.4f}")
         draw_confusion_matrix(predicted_labels, real_labels, label_mappings)
         test_gmvae_w(model, x, y, sample_dir, label_mappings)
 
@@ -246,6 +248,7 @@ def check_duplicate_labels(predicted_labels, real_labels, label_mappings):
         mapping_values = set(label_mappings.values())
         mapping_keys = set(label_mappings.keys())
         left_real_labels = set(real_labels) - mapping_values
+        print(len(left_real_labels))
         if len(left_real_labels) <= 0:
             break
         elif len(left_real_labels) == 1:
@@ -293,7 +296,7 @@ def draw_confusion_matrix(predicted_labels, real_labels, label_mappings):
 
         # Calculate the accuracy of prediction
         accuracy = accuracy_score(real_labels, adjusted_pred_labels)
-        print(f"Accuracy of prediction:    {accuracy}")
+        print(f"Accuracy of prediction after GMVAE:    {accuracy}")
 
         fig, ax = plt.subplots(figsize=(8, 6))
         sns.heatmap(confusion, annot=True, fmt="d", cmap="Blues", cbar=False, ax=ax)
@@ -303,25 +306,32 @@ def draw_confusion_matrix(predicted_labels, real_labels, label_mappings):
         plt.show()
 
 def test_gmvae_w(model, x, real_labels, sample_dir, label_mappings):
-    x_concat = torch.zeros(x.size(0), 1, 28, 28 * 11)
+    images_list = []
     # Filter images by digit type
     digit_indices = torch.nonzero((real_labels == 5)).flatten()
     digit_images = x[digit_indices]
     # Choose an image from the dataset
     image = digit_images[0].unsqueeze(0)  # Select the first image and add a batch dimension
-    x_concat[:, :, :, 0:28] = image.view(-1, 1, 28, 28)
-    #test features of w
-    for i in range(10):
-        vector = torch.zeros(1, 10).to(device)
-        j = next((key for key, value in label_mappings.items() if value == i), None)
-        vector[:, j] = 1
-        mu, var, z = model.inferz(image, vector)
-        x_rec = model.generatex(z)
-        x_concat[:, :, :, (i + 1) * 28 : (i + 2) * 28] = x_rec.view(-1, 1, 28, 28)
 
+    # different weight
+    for w_weight in range(1, 11, 1):
+        x_concat = torch.zeros(x.size(0), 1, 28, 28 * 11)
+        x_concat[:, :, :, 0:28] = image.view(-1, 1, 28, 28)
+        # different category
+        for i in range(10):
+            vector = torch.zeros(1, 10).to(device)
+            j = next((key for key, value in label_mappings.items() if value == i), None)
+            vector[:, j] = w_weight
+            mu, var, z = model.inferz(image, vector)
+            x_rec = model.generatex(z)
+            x_concat[:, :, :, (i + 1) * 28 : (i + 2) * 28] = x_rec.view(-1, 1, 28, 28)
+
+        images_list.append(x_concat)
+
+    vertical_concatenated_image = torch.cat(images_list, dim=2)  # Concatenate along dimension 2
     # Display input and reconstructed images
-    vutils.save_image(x_concat, os.path.join(sample_dir, 'testw_reconst.png'))
-    plt.imshow(x_concat[0, 0].cpu().detach().numpy(), cmap='gray')
+    save_image(vertical_concatenated_image, os.path.join(sample_dir, 'testw_reconst.png'), nrow=10)
+    plt.imshow(vertical_concatenated_image[0, 0].cpu().detach().numpy(), cmap='gray')
     plt.show()
 
 

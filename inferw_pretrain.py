@@ -1,13 +1,28 @@
+import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Subset, ConcatDataset
 
-def load_mnist_class(train_dataset, class_label, num_samples=20):
+num_classes = 10
+num_samples_per_class = 4
+
+
+def load_mnist_class(train_dataset, class_label, num_samples=4, is_train=True):
     class_indices = [i for i in range(len(train_dataset.targets)) if train_dataset.targets[i] == class_label]
     selected_indices = class_indices[:num_samples]
     subset_dataset = Subset(train_dataset, selected_indices)
 
-    return subset_dataset
+    if is_train:
+        return subset_dataset
+    else:
+        # use the remaining data to create a subset of the validation set
+        remaining_indices = list(set(range(len(train_dataset))) - set(selected_indices))
+        num_validation_samples = 200
+
+        validation_indices = remaining_indices[:num_validation_samples]
+        validation_dataset = Subset(train_dataset, validation_indices)
+
+        return validation_dataset
 
 def supervised_pretraining(model, data_loader, image_size, device, learning_rate=0.001, num_epochs=10):
     criterion = nn.CrossEntropyLoss()
@@ -29,22 +44,48 @@ def supervised_pretraining(model, data_loader, image_size, device, learning_rate
         epoch_loss = running_loss / len(data_loader)
         print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {epoch_loss:.4f}")
 
-def main(data_loader, model, image_size, device):
-    num_classes = 10
-    num_samples_per_class = 20
 
-    all_data = []
+def main(data_loader, model, image_size, device):
+    all_pretrain_data = []
+
     for class_label in range(num_classes):
         print(f"Loading data for class: {class_label}")
         pretrain_data = load_mnist_class(data_loader.dataset, class_label, num_samples=num_samples_per_class)
-        all_data.append(pretrain_data)
+        all_pretrain_data.append(pretrain_data)
 
     # Combine all data into a single dataset
-    combined_dataset = ConcatDataset(all_data)
-    pretrain_data_loader = DataLoader(combined_dataset, batch_size=num_samples_per_class, shuffle=True)
-
+    combined_pretrain_dataset = ConcatDataset(all_pretrain_data)
+    pretrain_data_loader = DataLoader(combined_pretrain_dataset, batch_size=num_samples_per_class, shuffle=True)
+    # pretrain
     supervised_pretraining(model.inferwNet, pretrain_data_loader, image_size, device)
+
 
     return model
 
-#TODO compate the accuracy of prediction before and after the VAE training
+def accuracy_after_pretrain(model, data_loader, image_size, device):
+    all_validate_data = []
+    correct_predictions = 0
+    total_samples = 0
+
+    with torch.no_grad():
+        # create validation data by remained data
+        for class_label in range(num_classes):
+            validation_data = load_mnist_class(data_loader.dataset, class_label,
+                                               num_samples=num_samples_per_class, is_train=False)
+            all_validate_data.append(validation_data)
+
+        #calculate the accuracy before GMVAE
+        combined_validate_dataset = ConcatDataset(all_validate_data)
+        validate_data_loader = DataLoader(combined_validate_dataset, batch_size=20, shuffle=True)
+        for inputs, targets in validate_data_loader:
+            inputs = inputs.to(device).view(-1, image_size)
+            targets = targets.to(device)
+            logits, _, _ = model(inputs, image_size)
+            _, predicted_labels = torch.max(logits, 1)
+            correct_predictions += (predicted_labels == targets).sum().item()
+            total_samples += len(targets)
+
+    accuracy = correct_predictions / total_samples
+    print(accuracy)
+    return accuracy
+
