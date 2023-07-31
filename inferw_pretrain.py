@@ -3,11 +3,14 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Subset, ConcatDataset
 
+# num_classes = 4
+# num_samples_per_class = 20
+
 num_classes = 10
-num_samples_per_class = 4
+num_samples_per_class = 7
 
 
-def load_mnist_class(train_dataset, class_label, num_samples=4, is_train=True):
+def load_mnist_class(train_dataset, class_label, num_samples, is_train=True):
     class_indices = [i for i in range(len(train_dataset.targets)) if train_dataset.targets[i] == class_label]
     selected_indices = class_indices[:num_samples]
     subset_dataset = Subset(train_dataset, selected_indices)
@@ -34,7 +37,7 @@ def supervised_pretraining(model, data_loader, image_size, device, learning_rate
         for inputs, targets in data_loader:
             optimizer.zero_grad()
             inputs = inputs.to(device).view(-1, image_size)
-            targets = targets.to(device)
+            targets = get_target_mapping(num_classes, targets).to(device)
             logits, _, _ = model(inputs, image_size)
             loss = criterion(logits, targets)
             loss.backward()
@@ -48,7 +51,7 @@ def supervised_pretraining(model, data_loader, image_size, device, learning_rate
 def main(data_loader, model, image_size, device):
     all_pretrain_data = []
 
-    for class_label in range(num_classes):
+    for class_label in range(10):
         print(f"Loading data for class: {class_label}")
         pretrain_data = load_mnist_class(data_loader.dataset, class_label, num_samples=num_samples_per_class)
         all_pretrain_data.append(pretrain_data)
@@ -76,16 +79,23 @@ def accuracy_after_pretrain(model, data_loader, image_size, device):
 
         #calculate the accuracy before GMVAE
         combined_validate_dataset = ConcatDataset(all_validate_data)
-        validate_data_loader = DataLoader(combined_validate_dataset, batch_size=20, shuffle=True)
+        validate_data_loader = DataLoader(combined_validate_dataset, batch_size=1000, shuffle=True)
         for inputs, targets in validate_data_loader:
             inputs = inputs.to(device).view(-1, image_size)
-            targets = targets.to(device)
+            targets = get_target_mapping(num_classes, targets).to(device)
             logits, _, _ = model(inputs, image_size)
             _, predicted_labels = torch.max(logits, 1)
             correct_predictions += (predicted_labels == targets).sum().item()
             total_samples += len(targets)
 
     accuracy = correct_predictions / total_samples
-    print(accuracy)
     return accuracy
+
+def get_target_mapping(num_classes, targets):
+    if num_classes == 4:
+        target_mapping = {0: 0, 6: 0, 8: 0, 1: 1, 7: 1, 2: 2,
+                          3: 2, 5: 2, 4: 3, 9: 3}
+        targets = torch.tensor([target_mapping[target.item()] for target in targets], dtype=torch.long)
+    return targets
+
 

@@ -1,19 +1,18 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.init as init
 import numpy as np
 np.set_printoptions(threshold=np.inf)
 
 # latent variables distribution: gaussian mixture
 class VAE(nn.Module):
-    def __init__(self, image_size=784, h_dim=400, z_dim=20, num_components=10):
+    def __init__(self, image_size=784, h_dim=400, z_dim=20, num_classes=10):
         super(VAE, self).__init__()
-        self.num_components = num_components
+        self.num_classes = num_classes
         self.z_dim = z_dim
 
-        self.inferwNet = InferwNet(image_size, num_components)
-        self.attentionNet = AttentionNet(image_size + num_components, h_dim, 800)
+        self.inferwNet = InferwNet(image_size, num_classes)
+        self.attentionNet = AttentionNet(image_size + num_classes, h_dim, 800)
         self.image_size = image_size
 
         # Initialize inferwNet
@@ -23,7 +22,7 @@ class VAE(nn.Module):
                 nn.init.zeros_(module.bias)
 
         self.inferzNet = torch.nn.ModuleList([
-            nn.Linear(image_size + num_components, h_dim),
+            nn.Linear(image_size + num_classes, h_dim),
             nn.ReLU(),
             nn.Linear(h_dim, h_dim),
             nn.ReLU(),
@@ -37,8 +36,8 @@ class VAE(nn.Module):
             torch.nn.Sigmoid()
         ])
 
-        self.w_mu = nn.Linear(num_components, z_dim)
-        self.w_var = nn.Linear(num_components, z_dim)
+        self.w_mu = nn.Linear(num_classes, z_dim)
+        self.w_var = nn.Linear(num_classes, z_dim)
 
     def inferw(self, x):
         return self.inferwNet(x, self.image_size)
@@ -149,7 +148,7 @@ class ReparameterizeTrick(nn.Module):
         return mu, var, z
 
 class InferwNet(nn.Module):
-    def __init__(self, image_size, num_clusters):
+    def __init__(self, image_size, num_classes):
         super(InferwNet, self).__init__()
         self.conv_layers = nn.Sequential(
             nn.Conv2d(in_channels=1, out_channels=32, kernel_size=3, stride=1, padding=1),
@@ -161,10 +160,10 @@ class InferwNet(nn.Module):
         )
 
         self.fc_layers = nn.Sequential(
-            nn.Linear(64 * 7 * 7, 10)
+            nn.Linear(64 * 7 * 7, num_classes)
         )
-        self.num_clusters = num_clusters
-        self.batch_norm = nn.BatchNorm1d(num_clusters)
+        self.num_classes = num_classes
+        self.batch_norm = nn.BatchNorm1d(num_classes)
 
     def forward(self, x, image_size):
         # batch_size, len_size = x.size(0), 28
@@ -177,7 +176,7 @@ class InferwNet(nn.Module):
         features = self.conv_layers(x_reshape)
         features = features.view(features.size(0), -1)  # Flatten the tensor
         logits = self.fc_layers(features)
-        logits = self.batch_norm(logits).view(-1, self.num_clusters)
+        logits = self.batch_norm(logits).view(-1, self.num_classes)
 
         batch_size = logits.shape[0]
         max_indices = np.argmax(logits.cpu().detach().numpy(), axis=1)

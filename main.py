@@ -3,7 +3,6 @@ import torch
 import torch.nn.functional as F
 import torchvision
 from torchvision import transforms
-import torchvision.utils as vutils
 from torchvision.utils import save_image
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
@@ -29,11 +28,11 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 image_size = 784
 h_dim = 400
 z_dim = 20
-num_epochs = 17
+num_epochs = 16
 batch_size = 128
 learning_rate = 1e-3
 model_param = 0
-num_clusters = 10
+num_classes = 10
 # Get the dataset
 dataset = torchvision.datasets.MNIST(root='./data',
                                      train=True,
@@ -118,7 +117,7 @@ def main():
             if model_param == 4 or model_param == 5:
                 reconst_loss = F.binary_cross_entropy(x_reconst, x, reduction='sum')
                 reconst_loss = reconst_loss/batch_size
-                kl_divergence = model.kl_divergence(res)
+                kl_divergence = 3.5 * model.kl_divergence(res)
             else:
                 reconst_loss = F.binary_cross_entropy(x_reconst, x, reduction='sum')
                 kl_divergence = model.kl_divergence(res)
@@ -152,7 +151,7 @@ def main():
             if model_param == 4 or model_param == 5:
                 x_rec_raw, _, _ = model.decode(z, res['categorical'])
                 out = x_rec_raw.view(-1, 1, 28, 28)
-                if epoch > num_epochs - 4:
+                if epoch > num_epochs - 3:
                     predicted_labels.append(torch.topk(res['categorical'], 1)[1].squeeze(1))
                     real_labels.append(y)
             else:
@@ -168,11 +167,20 @@ def main():
             save_image(x_concat, os.path.join(sample_dir, 'reconst-{}.png'.format(epoch + 1)))
 
     if model_param == 4 or model_param == 5:
+        # 10 classes
         label_mappings = get_pred_real_label_mapping(predicted_labels, real_labels)
         print(label_mappings)
         print(f"Validation Accuracy After Pretrain: {accuracy_pretrain:.4f}")
         draw_confusion_matrix(predicted_labels, real_labels, label_mappings)
         test_gmvae_w(model, x, y, sample_dir, label_mappings)
+
+        # 4 classes
+        # target_mapping = {0: 0, 6: 0, 8: 0, 1: 1, 7: 1, 2: 2,
+        #                   3: 2, 5: 2, 4: 3, 9: 3}
+        # print(f"Validation Accuracy After Pretrain: {accuracy_pretrain:.4f}")
+        # draw_confusion_matrix(predicted_labels, real_labels, target_mapping)
+        # label_mappings = {0:0, 1:1, 2:2, 3:3}
+        # test_gmvae_w(model, x, y, sample_dir, label_mappings)
 
     # Perform t-SNE on the latent variables
     fig, ax = plt.subplots(1, 3)
@@ -248,7 +256,6 @@ def check_duplicate_labels(predicted_labels, real_labels, label_mappings):
         mapping_values = set(label_mappings.values())
         mapping_keys = set(label_mappings.keys())
         left_real_labels = set(real_labels) - mapping_values
-        print(len(left_real_labels))
         if len(left_real_labels) <= 0:
             break
         elif len(left_real_labels) == 1:
@@ -287,16 +294,23 @@ def draw_confusion_matrix(predicted_labels, real_labels, label_mappings):
     # print(real_labels)
 
     with torch.no_grad():
-        real_labels = torch.cat(real_labels).cpu().numpy().flatten()
+        real_labels = torch.cat(real_labels).cpu().numpy().flatten() # 10 classes
+        # real_labels = [label_mappings[label.item()] for labels in real_labels for label in labels]# 4 classes
+
         predicted_labels = torch.cat(predicted_labels).cpu().numpy().flatten()
 
+        # 10 classes
         vectorized_replace = np.vectorize(replace_confusion_elements)
         adjusted_pred_labels = vectorized_replace(predicted_labels, label_mappings)
         confusion = confusion_matrix(real_labels, adjusted_pred_labels)
 
+        # 4 classes
+        # confusion = confusion_matrix(real_labels, predicted_labels)
+
         # Calculate the accuracy of prediction
-        accuracy = accuracy_score(real_labels, adjusted_pred_labels)
-        print(f"Accuracy of prediction after GMVAE:    {accuracy}")
+        # accuracy = accuracy_score(real_labels, adjusted_pred_labels)
+        accuracy = accuracy_score(real_labels, predicted_labels)
+        print(f"Accuracy of prediction after GMVAE:    {accuracy:.4f}")
 
         fig, ax = plt.subplots(figsize=(8, 6))
         sns.heatmap(confusion, annot=True, fmt="d", cmap="Blues", cbar=False, ax=ax)
@@ -315,22 +329,22 @@ def test_gmvae_w(model, x, real_labels, sample_dir, label_mappings):
 
     # different weight
     for w_weight in range(1, 11, 1):
-        x_concat = torch.zeros(x.size(0), 1, 28, 28 * 11)
+        x_concat = torch.zeros(x.size(0), 1, 28, 28 * (1+num_classes))
         x_concat[:, :, :, 0:28] = image.view(-1, 1, 28, 28)
         # different category
-        for i in range(10):
-            vector = torch.zeros(1, 10).to(device)
+        for i in range(num_classes):
+            vector = torch.zeros(1, num_classes).to(device)
             j = next((key for key, value in label_mappings.items() if value == i), None)
             vector[:, j] = w_weight
             mu, var, z = model.inferz(image, vector)
             x_rec = model.generatex(z)
-            x_concat[:, :, :, (i + 1) * 28 : (i + 2) * 28] = x_rec.view(-1, 1, 28, 28)
+            x_concat[:, :, :, (i + 1) * 28: (i + 2) * 28] = x_rec.view(-1, 1, 28, 28)
 
         images_list.append(x_concat)
 
     vertical_concatenated_image = torch.cat(images_list, dim=2)  # Concatenate along dimension 2
     # Display input and reconstructed images
-    save_image(vertical_concatenated_image, os.path.join(sample_dir, 'testw_reconst.png'), nrow=10)
+    save_image(vertical_concatenated_image, os.path.join(sample_dir, 'testw_reconst.png'), nrow=num_classes)
     plt.imshow(vertical_concatenated_image[0, 0].cpu().detach().numpy(), cmap='gray')
     plt.show()
 
