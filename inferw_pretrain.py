@@ -3,11 +3,11 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Subset, ConcatDataset
 
-# num_classes = 4
-# num_samples_per_class = 20
-
-num_classes = 10
+num_classes = 4
 num_samples_per_class = 7
+
+# num_classes = 10
+# num_samples_per_class = 7
 
 
 def load_mnist_class(train_dataset, class_label, num_samples, is_train=True):
@@ -93,8 +93,10 @@ def accuracy_after_pretrain(model, data_loader, image_size, device):
 
 def get_target_mapping(num_classes, targets):
     if num_classes == 4:
-        target_mapping = {0: 0, 6: 0, 8: 0, 1: 1, 7: 1, 2: 2,
-                          3: 2, 5: 2, 4: 3, 9: 3}
+        # target_mapping = {0: 0, 6: 0, 8: 0, 1: 1, 7: 1, 2: 2,
+        #                   3: 2, 5: 2, 4: 3, 9: 3}
+        target_mapping = {0: 0, 6: 1, 8: 3, 1: 3, 7: 0, 2: 1,
+                          3: 2, 5: 3, 4: 2, 9: 1}
         targets = torch.tensor([target_mapping[target.item()] for target in targets], dtype=torch.long)
     return targets
 

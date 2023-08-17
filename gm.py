@@ -6,7 +6,7 @@ np.set_printoptions(threshold=np.inf)
 
 # latent variables distribution: gaussian mixture
 class VAE(nn.Module):
-    def __init__(self, image_size=784, h_dim=400, z_dim=20, num_classes=10):
+    def __init__(self, image_size=784, h_dim=400, z_dim=20, num_classes=4):
         super(VAE, self).__init__()
         self.num_classes = num_classes
         self.z_dim = z_dim
