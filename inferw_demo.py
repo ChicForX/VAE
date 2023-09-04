@@ -1,3 +1,7 @@
+# This file is intended for training the inferwNet of an unsupervised GMVAE.
+# The attempt was made to use the K-means method, but the accuracy was not satisfactory.
+# In the end, it was not adopted.
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

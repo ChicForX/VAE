@@ -18,11 +18,7 @@ class VAE(nn.Module):
         self.image_size = image_size
 
         self.inferzNet = torch.nn.ModuleList([
-            nn.Linear(node_sampled * gcn_output, h_dim),
-            nn.ReLU(),
-            nn.Linear(h_dim, h_dim),
-            nn.ReLU(),
-            ReparameterizeTrick(h_dim, z_dim)
+            ReparameterizeTrick(node_sampled * gcn_output, z_dim)
         ])
 
         self.generatexNet = torch.nn.ModuleList([
@@ -31,9 +27,6 @@ class VAE(nn.Module):
             nn.Linear(h_dim, image_size),
             torch.nn.Sigmoid()
         ])
-
-        self.w_mu = nn.Linear(node_sampled * gcn_output, z_dim)
-        self.w_var = nn.Linear(node_sampled * gcn_output, z_dim)
 
     def inferg(self, x):
         return self.infergNet(x)

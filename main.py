@@ -21,6 +21,9 @@ from sklearn.metrics import confusion_matrix, accuracy_score
 import seaborn as sns
 from scipy.stats import mode
 from collections import defaultdict
+import time
+from visualization import plot_loss_curve
+from sample_recon import generate_and_compare_samples
 
 # Configure GPU or CPU settings
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -28,12 +31,12 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # Set hyperparameters
 image_size = 784
 h_dim = 400
-z_dim = 70
+z_dim = 20
 num_epochs = 15
 batch_size = 128
 learning_rate = 1e-3
 model_param = 0
-num_classes = 4
+num_classes = 10
 # Get the dataset
 dataset = torchvision.datasets.MNIST(root='./data',
                                      train=True,
@@ -86,8 +89,11 @@ def main():
         # for confusion matrix
         predicted_labels = []
         real_labels = []
+        # Training loop
+        pretrain_start_time = time.time()
         model = inferw_pretrain.main(data_loader, model, image_size, device)
         accuracy_pretrain = inferw_pretrain.accuracy_after_pretrain(model.inferwNet, data_loader, image_size, device)
+        pretrain_time = time.time() - pretrain_start_time
     elif model_param == 6:
         model = graphVAE1.VAE().to(device)
         sample_dir += '_graph'
@@ -103,6 +109,8 @@ def main():
     # optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     # Training loop
+    start_time = time.time()
+    losses = []
     for epoch in range(num_epochs):
         y_np = []
         z_np = []
@@ -126,7 +134,9 @@ def main():
                 kl_divergence = 3.5 * model.kl_divergence(res)
             else:
                 reconst_loss = F.binary_cross_entropy(x_reconst, x, reduction='sum')
+                reconst_loss = reconst_loss / batch_size
                 kl_divergence = model.kl_divergence(res)
+                # kl_divergence = kl_divergence / batch_size #bernoulli
 
             # Backpropagation and Optimization
             loss = reconst_loss + kl_divergence
@@ -136,6 +146,7 @@ def main():
             loss.backward()
             # update parameter values
             optimizer.step()
+            losses.append(loss.item())
             # print the loss
             if (i + 1) % 10 == 0:
                 print("Epoch[{}/{}], Step [{}/{}], Reconst Loss: {:.4f}, KL Div: {:.4f}"
@@ -175,26 +186,34 @@ def main():
             x_concat = torch.cat([x.view(-1, 1, 28, 28), out['x_rec'].view(-1, 1, 28, 28)], dim=3)
             save_image(x_concat, os.path.join(sample_dir, 'reconst-{}.png'.format(epoch + 1)))
 
+    # train time
+    end_time = time.time()
+    training_time = end_time - start_time
+    if model_param == 5:
+        training_time = training_time + pretrain_time
+    print(f"Total training time: {training_time:.2f} seconds")
+
+    # train efficiency
+    # plot_loss_curve(losses, num_epochs, data_loader)
+
     if model_param == 4 or model_param == 5:
         # 10 classes
-        # label_mappings = get_pred_real_label_mapping(predicted_labels, real_labels)
-        # print(label_mappings)
+        label_mappings = get_pred_real_label_mapping(predicted_labels, real_labels)
+        print(label_mappings)
         # print(f"Validation Accuracy After Pretrain: {accuracy_pretrain:.4f}")
-        # draw_confusion_matrix(predicted_labels, real_labels, label_mappings)
-        # test_gmvae_w(model, x, y, sample_dir, label_mappings)
+        draw_confusion_matrix(predicted_labels, real_labels, label_mappings)
+        test_gmvae_w(model, x, y, sample_dir, label_mappings)
 
         # 4 classes
         # target_mapping = {0: 0, 6: 0, 8: 0, 1: 1, 7: 1, 2: 2,
         #                   3: 2, 5: 2, 4: 3, 9: 3}
-        target_mapping = {0: 0, 6: 1, 8: 3, 1: 3, 7: 0, 2: 1,
-                          3: 2, 5: 3, 4: 2, 9: 1}
-        print(f"Validation Accuracy After Pretrain: {accuracy_pretrain:.4f}")
-        draw_confusion_matrix(predicted_labels, real_labels, target_mapping)
-        label_mappings = {0:0, 1:1, 2:2, 3:3}
-        test_gmvae_w(model, x, y, sample_dir, label_mappings)
+        # target_mapping = {0: 0, 6: 1, 8: 3, 1: 3, 7: 0, 2: 1,
+        #                   3: 2, 5: 3, 4: 2, 9: 1}
+        # print(f"Validation Accuracy After Pretrain: {accuracy_pretrain:.4f}")
+        # draw_confusion_matrix(predicted_labels, real_labels, target_mapping)
+        # label_mappings = {0:0, 1:1, 2:2, 3:3}
+        # test_gmvae_w(model, x, y, sample_dir, label_mappings)
 
-    if model_param == 6:
-        test_graph_mix(model, x, y, sample_dir)
 
     # Perform t-SNE on the latent variables
     fig, ax = plt.subplots(1, 3)
@@ -208,12 +227,14 @@ def main():
     ax[1].imshow(image_1)
     ax[1].set_axis_off()
 
-    image_15 = mpimg.imread(sample_dir + '/reconst-15.png')
+    image_epoch = mpimg.imread(sample_dir + '/reconst-15.png')
     plt.subplot(1, 3, 3)
-    ax[2].imshow(image_15)
+    ax[2].imshow(image_epoch)
     ax[2].set_axis_off()
     plt.show()
 
+    # generate new samples
+    generate_and_compare_samples(model, data_loader, model_param, device, z_dim)
 
 def plotdistribution(Label, Mat, ax):
     warnings.filterwarnings('ignore', category=FutureWarning)
@@ -222,14 +243,8 @@ def plotdistribution(Label, Mat, ax):
 
     x = Mat[:, 0]
     y = Mat[:, 1]
-    # map_size = {0: 5, 1: 5}
-    # size = list(map(lambda x: map_size[x], Label))
     map_color = {0: 'r', 1: 'g',2:'b',3:'y',4:'k',5:'m',6:'c',7:'pink',8:'grey',9:'blueviolet'}
     color = list(map(lambda x: map_color[x], Label))
-    # error occurs because the marker parameter does not support lists
-    # map_marker = {-1: 'o', 1: 'v'}
-    # markers = list(map(lambda x: map_marker[x], Label))
-    #  plt.scatter(np.array(x), np.array(y), s=size, c=color, marker=markers)
     ax[0].scatter(np.array(x), np.array(y), s=5, c=color, marker='o')  # The scatter function only supports array type data
     ax[0].set_axis_on()
 
@@ -308,22 +323,22 @@ def draw_confusion_matrix(predicted_labels, real_labels, label_mappings):
     # print(real_labels)
 
     with torch.no_grad():
-        # real_labels = torch.cat(real_labels).cpu().numpy().flatten() # 10 classes
-        real_labels = [label_mappings[label.item()] for labels in real_labels for label in labels]# 4 classes
+        real_labels = torch.cat(real_labels).cpu().numpy().flatten() # 10 classes
+        # real_labels = [label_mappings[label.item()] for labels in real_labels for label in labels]# 4 classes
 
         predicted_labels = torch.cat(predicted_labels).cpu().numpy().flatten()
 
         # 10 classes
-        # vectorized_replace = np.vectorize(replace_confusion_elements)
-        # adjusted_pred_labels = vectorized_replace(predicted_labels, label_mappings)
-        # confusion = confusion_matrix(real_labels, adjusted_pred_labels)
+        vectorized_replace = np.vectorize(replace_confusion_elements)
+        adjusted_pred_labels = vectorized_replace(predicted_labels, label_mappings)
+        confusion = confusion_matrix(real_labels, adjusted_pred_labels)
 
         # 4 classes
-        confusion = confusion_matrix(real_labels, predicted_labels)
+        # confusion = confusion_matrix(real_labels, predicted_labels)
 
         # Calculate the accuracy of prediction
-        # accuracy = accuracy_score(real_labels, adjusted_pred_labels)
-        accuracy = accuracy_score(real_labels, predicted_labels)
+        accuracy = accuracy_score(real_labels, adjusted_pred_labels)
+        # accuracy = accuracy_score(real_labels, predicted_labels)
         print(f"Accuracy of prediction after GMVAE:    {accuracy:.4f}")
 
         fig, ax = plt.subplots(figsize=(8, 6))
@@ -336,7 +351,7 @@ def draw_confusion_matrix(predicted_labels, real_labels, label_mappings):
 def test_gmvae_w(model, x, real_labels, sample_dir, label_mappings):
     images_list = []
     # Filter images by digit type
-    digit_indices = torch.nonzero((real_labels == 5)).flatten()
+    digit_indices = torch.nonzero((real_labels == 2)).flatten()
     digit_images = x[digit_indices]
     # Choose an image from the dataset
     image = digit_images[0].unsqueeze(0)  # Select the first image and add a batch dimension
@@ -360,28 +375,6 @@ def test_gmvae_w(model, x, real_labels, sample_dir, label_mappings):
     # Display input and reconstructed images
     save_image(vertical_concatenated_image, os.path.join(sample_dir, 'testw_reconst.png'), nrow=num_classes)
     plt.imshow(vertical_concatenated_image[0, 0].cpu().detach().numpy(), cmap='gray')
-    plt.show()
-
-def test_graph_mix(model, x, real_labels, sample_dir):
-    images_list = []
-    # Filter images by digit type
-    digit_indices = torch.nonzero((real_labels == 4)).flatten()
-    digit_images = x[digit_indices]
-    # Choose an image from the dataset
-    image1 = digit_images[0].unsqueeze(0)  # Select the first image and add a batch dimension
-    digit_indices = torch.nonzero((real_labels == 7)).flatten()
-    digit_images = x[digit_indices]
-    # Choose an image from the dataset
-    image2 = digit_images[0].unsqueeze(0)
-
-    x_concat = torch.zeros(x.size(0), 1, 28, 28 * 3)
-    x_concat[:, :, :, 0: 1 * 28] = image1.view(-1, 1, 28, 28)
-    x_concat[:, :, :, 1 * 28: 2 * 28] = image2.view(-1, 1, 28, 28)
-    graph = model.inferg(image1)
-    _, _, z = model.inferz(graph)
-    x_rec = model.generatex(z)
-    x_concat[:, :, :, 2 * 28: 3 * 28] = x_rec.view(-1, 1, 28, 28)
-    plt.imshow(x_concat[0, 0].cpu().detach().numpy(), cmap='gray')
     plt.show()
 
 if __name__ == "__main__":

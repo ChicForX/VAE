@@ -3,11 +3,11 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Subset, ConcatDataset
 
-num_classes = 4
-num_samples_per_class = 7
-
-# num_classes = 10
+# num_classes = 4
 # num_samples_per_class = 7
+
+num_classes = 10
+num_samples_per_class = 5
 
 
 def load_mnist_class(train_dataset, class_label, num_samples, is_train=True):
@@ -38,7 +38,7 @@ def supervised_pretraining(model, data_loader, image_size, device, learning_rate
             optimizer.zero_grad()
             inputs = inputs.to(device).view(-1, image_size)
             targets = get_target_mapping(num_classes, targets).to(device)
-            logits, _, _ = model(inputs, image_size)
+            _, logits, _ = model(inputs, image_size)
             loss = criterion(logits, targets)
             loss.backward()
             optimizer.step()
